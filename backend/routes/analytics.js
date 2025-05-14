@@ -81,41 +81,88 @@ router.post("/verify-password/:qrCodeId", async (req, res) => {
     const { qrCodeId } = req.params;
     const { password } = req.body;
 
-    const qrCode = await QRCode.findById(qrCodeId);
+    console.log(
+      "Password verification attempt for QR:",
+      qrCodeId,
+      "Password received:",
+      !!password
+    );
 
+    const qrCode = await QRCode.findById(qrCodeId);
     if (!qrCode) {
+      console.log("QR code not found");
       return res.status(404).json({ error: "QR code not found" });
     }
 
-    // First check expiration
-    if (isQrCodeExpired(qrCode)) {
-      return res.json({
+    // Verify the QR code is actually password protected
+    if (!qrCode.security?.isPasswordProtected) {
+      console.log("QR code is not password protected");
+      return res
+        .status(400)
+        .json({ error: "This QR code is not password protected" });
+    }
+
+    // Validate expiration
+    if (
+      qrCode.security.expiresAt &&
+      new Date() > new Date(qrCode.security.expiresAt)
+    ) {
+      console.log("QR code expired");
+      return res.status(410).json({
         expired: true,
-        message: "This QR code has expired or reached maximum scans",
+        message: "This QR code has expired",
+      });
+    }
+
+    // Validate scan limit
+    if (
+      qrCode.security.maxScans > 0 &&
+      qrCode.analytics.scanCount >= qrCode.security.maxScans
+    ) {
+      console.log("Scan limit reached");
+      return res.status(429).json({
+        expired: true,
+        message: "This QR code has reached its maximum number of scans",
       });
     }
 
     // Handle password check
-    if (qrCode.security.isPasswordProtected) {
-      if (!password) {
-        return res.status(401).json({ error: "Password is required" });
-      }
-      if (qrCode.security.password !== password) {
-        return res.status(401).json({ error: "Invalid password" });
-      }
+    if (!password) {
+      console.log("No password provided");
+      return res.status(401).json({ error: "Password is required" });
+    }
 
-      // Record scan after successful password verification
-      await recordScan(qrCodeId, {
-        userAgent: req.headers["user-agent"],
-        ip: req.ip,
-        referer: req.headers.referer,
+    // Compare passwords after trimming whitespace
+    const storedPassword = qrCode.security.password.trim();
+    const submittedPassword = password.trim();
+
+    console.log("Comparing passwords (length):", {
+      stored: storedPassword.length,
+      provided: submittedPassword.length,
+    });
+
+    if (storedPassword !== submittedPassword) {
+      console.log("Password mismatch");
+      return res.status(401).json({
+        error: "Invalid password",
+        message: "The password you entered is incorrect. Please try again.",
       });
     }
+
+    console.log("Password correct");
+
+    // Record scan after successful password verification
+    await recordScan(qrCodeId, {
+      userAgent: req.headers["user-agent"],
+      ip: req.ip,
+      referer: req.headers.referer,
+    });
 
     // Return success and the original destination URL
     res.json({
       success: true,
-      redirectUrl: qrCode.text, // Return the original destination URL
+      redirectUrl: qrCode.text,
+      message: "Password verified successfully",
       qrCode: {
         text: qrCode.text,
         type: qrCode.qrType,

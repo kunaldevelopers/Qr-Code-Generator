@@ -88,55 +88,111 @@ router.post("/", authMiddleware, async (req, res) => {
       text, // This is the original destination URL
       qrType = "url",
       customization = {},
-      security = {},
+      security = {}, // security object from request
       tags = [],
       enableTracking = true, // Default to true if not provided
     } = req.body;
 
-    // Process security options
+    console.log(
+      "Received request to create QR code. Security input:",
+      JSON.stringify(security, null, 2)
+    );
+
+    // Validate and process security options
+    const isProtected = Boolean(security.isPasswordProtected);
+    let passwordValue = "";
+
+    if (isProtected) {
+      if (
+        !security.password ||
+        typeof security.password !== "string" ||
+        security.password.trim() === ""
+      ) {
+        console.error(
+          "Password validation failed during QR creation. Received security object:",
+          JSON.stringify(security, null, 2)
+        );
+        return res
+          .status(400)
+          .json({
+            error:
+              "Password is required and cannot be empty when password protection is enabled.",
+          });
+      }
+      passwordValue = security.password.trim(); // Use trimmed password
+      console.log(
+        "Password protection enabled. Password to be saved (trimmed):",
+        passwordValue
+      );
+    } else {
+      console.log("Password protection not enabled.");
+    }
+
     const processedSecurity = {
-      password: security.isPasswordProtected ? security.password : "",
-      isPasswordProtected: Boolean(security.isPasswordProtected),
-      expiresAt: security.expiresAt || null,
+      isPasswordProtected: isProtected,
+      password: passwordValue, // This will be empty if not protected, or the trimmed password if protected
+      expiresAt: security.expiresAt ? new Date(security.expiresAt) : null, // Ensure Date object or null
       maxScans: parseInt(security.maxScans) || 0,
     };
 
-    let qrTextForImage = text; // By default, QR image uses the original text
-    let finalTrackingUrl = null; // No tracking URL by default
-    const temporaryId = new mongoose.Types.ObjectId(); // Generate ID for the QR code record
+    console.log(
+      "Processed security object for new QR Code:",
+      JSON.stringify(processedSecurity, null, 2)
+    );
+
+    let qrTextForImage = text;
+    let finalTrackingUrl = null;
+    const temporaryId = new mongoose.Types.ObjectId();
 
     if (enableTracking) {
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       finalTrackingUrl = createTrackingUrl(baseUrl, temporaryId.toString());
-      qrTextForImage = finalTrackingUrl; // If tracking is on, QR image uses the tracking URL
+      qrTextForImage = finalTrackingUrl;
     }
 
-    // Generate QR code image with appropriate text (original or tracking) and customizations
     const finalQrImage = await generateQRCodeWithLogo(
       qrTextForImage,
       customization
     );
 
-    // Create and save the QR code with all required fields
     const qrCode = new QRCodeModel({
-      _id: temporaryId, // Use the generated ID
+      _id: temporaryId,
       userId,
-      text, // Always store the original URL/text in the 'text' field for redirection or display
-      qrImage: finalQrImage, // Store the generated QR code image
+      text,
+      qrImage: finalQrImage,
       qrType,
       security: processedSecurity,
       customization,
       tags,
-      trackingEnabled: enableTracking, // Store tracking status
-      trackingUrl: finalTrackingUrl, // Store the tracking URL if enabled
+      trackingEnabled: enableTracking,
+      trackingUrl: finalTrackingUrl,
     });
 
+    console.log(
+      "QRCode Mongoose model instance before save. Security:",
+      JSON.stringify(qrCode.toObject().security, null, 2)
+    );
+
     await qrCode.save();
-    // Return the full qrCode object, which now includes qrImage
+
+    console.log(
+      "QRCode saved successfully. Security from saved document:",
+      JSON.stringify(qrCode.toObject().security, null, 2)
+    );
+
     res.status(201).json(qrCode);
   } catch (error) {
-    console.error("Error creating QR code:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Error creating QR code:", error.message);
+    if (error.errors) {
+      console.error(
+        "Mongoose validation errors during creation:",
+        JSON.stringify(error.errors, null, 2)
+      );
+    }
+    console.error("Full error stack:", error.stack);
+    res
+      .status(500)
+      .json({ error: "Internal server error", details: error.message });
   }
 });
 

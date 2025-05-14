@@ -58,13 +58,6 @@ const qrCodeSchema = new mongoose.Schema({
   security: {
     password: {
       type: String,
-      set: function (val) {
-        // Only set password if isPasswordProtected is true
-        if (this.security && this.security.isPasswordProtected) {
-          return val;
-        }
-        return "";
-      },
     },
     isPasswordProtected: { type: Boolean, default: false },
     expiresAt: {
