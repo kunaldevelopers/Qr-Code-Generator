@@ -106,7 +106,10 @@ router.post("/", authMiddleware, async (req, res) => {
     const trackingUrl = createTrackingUrl(baseUrl, temporaryId.toString()); // Use temporaryId for tracking
 
     // Generate QR code image with tracking URL and logo/customizations
-    const finalQrImage = await generateQRCodeWithLogo(trackingUrl, customization);
+    const finalQrImage = await generateQRCodeWithLogo(
+      trackingUrl,
+      customization
+    );
 
     // Create and save the QR code with all required fields
     const qrCode = new QRCodeModel({
@@ -315,7 +318,10 @@ router.post("/bulk", authMiddleware, async (req, res) => {
           const trackingUrl = createTrackingUrl(baseUrl, temporaryId);
 
           // Generate QR code using the same logic as single QR code creation
-          const finalQrImage = await generateQRCodeWithLogo(trackingUrl, qr.customization);
+          const finalQrImage = await generateQRCodeWithLogo(
+            trackingUrl,
+            qr.customization
+          );
 
           const qrCode = new QRCodeModel({
             _id: temporaryId,
@@ -324,7 +330,9 @@ router.post("/bulk", authMiddleware, async (req, res) => {
             qrImage: finalQrImage,
             qrType: qr.qrType || "url",
             security: {
-              password: qr.security?.isPasswordProtected ? qr.security.password : "",
+              password: qr.security?.isPasswordProtected
+                ? qr.security.password
+                : "",
               isPasswordProtected: Boolean(qr.security?.isPasswordProtected),
               expiresAt: qr.security?.expiresAt || null,
               maxScans: parseInt(qr.security?.maxScans) || 0,
