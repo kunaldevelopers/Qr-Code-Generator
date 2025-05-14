@@ -12,8 +12,6 @@ import { QRBulkGenerator } from "./QRBulkGenerator";
 import { QRAnalytics } from "./QRAnalytics";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
-import { generateQRWithLogo } from "../utils/qrGenerator";
-// CSS module styles imported via className attributes
 
 interface QRCodeHistory {
   _id: string;
@@ -39,12 +37,11 @@ export function QRGenerator() {
   const [history, setHistory] = useState<QRCodeHistory[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
-
   // New state variables for enhanced features
   const [activeTab, setActiveTab] = useState("generate");
   const [qrType, setQrType] = useState("url");
   const [qrData, setQrData] = useState<any>({ url: "" });
-  // State for showing/hiding bulk generator - using activeTab now instead
+  // Removed unused showBulkGenerator state
   const qrRef = useRef<HTMLDivElement>(null);
   const [customization, setCustomization] = useState({
     color: "#000000",
@@ -121,40 +118,76 @@ export function QRGenerator() {
 
       setIsLoading(true);
 
-      try {
-        // Generate QR code with customization and logo
-        const url = await generateQRWithLogo(qrContent, {
-          color: customization.color,
-          backgroundColor: customization.backgroundColor,
-          margin: customization.margin,
-          logo: customization.logo,
-        });
+      // Generate QR code with customization
+      let url = "";
 
-        setQrImage(url);
-        setText(qrContent); // Set text for backward compatibility
-
-        // Save to backend
-        if (user?.userId) {
-          await ApiClient.post(AUTH_API.QR_CODES, {
-            text: qrContent,
-            qrImage: url,
-            qrType,
-            customization,
-            security,
+      if (customization.logo) {
+        try {
+          // Use QR code with logo
+          const canvas = document.createElement("canvas");
+          const qrCodeWithLogo = new QRCodeWithLogo({
+            canvas,
+            content: qrContent,
+            width: 300,
+            logo: {
+              src: customization.logo,
+              width: 80, // Logo width
+              height: 80, // Logo height
+              borderRadius: 8, // Rounded corners for the logo
+              crossOrigin: "anonymous",
+            },
+            nodeQrCodeOptions: {
+              margin: customization.margin,
+              color: {
+                dark: customization.color,
+                light: customization.backgroundColor,
+              },
+            },
           });
 
-          // Refresh history
-          const data = await ApiClient.get(AUTH_API.QR_CODES);
-          setHistory(data);
+          await qrCodeWithLogo.toImage();
+          url = canvas.toDataURL();
+        } catch (logoError) {
+          console.error("Error adding logo to QR code:", logoError);
+          // Fallback to regular QR code
+          url = await QRCode.toDataURL(qrContent, {
+            margin: customization.margin,
+            color: {
+              dark: customization.color,
+              light: customization.backgroundColor,
+            },
+          });
         }
-
-        toast.success("QR Code generated successfully!");
-      } catch (qrError) {
-        console.error("Error generating QR code:", qrError);
-        toast.error(
-          "Failed to generate QR code with logo. Try again without a logo."
-        );
+      } else {
+        // Use standard QR code library (no logo)
+        url = await QRCode.toDataURL(qrContent, {
+          margin: customization.margin,
+          color: {
+            dark: customization.color,
+            light: customization.backgroundColor,
+          },
+        });
       }
+
+      setQrImage(url);
+      setText(qrContent); // Set text for backward compatibility
+
+      // Save to backend
+      if (user?.userId) {
+        await ApiClient.post(AUTH_API.QR_CODES, {
+          text: qrContent,
+          qrImage: url,
+          qrType,
+          customization,
+          security,
+        });
+
+        // Refresh history
+        const data = await ApiClient.get(AUTH_API.QR_CODES);
+        setHistory(data);
+      }
+
+      toast.success("QR Code generated successfully!");
     } catch (err) {
       console.error("Error generating QR code:", err);
       toast.error("Error generating QR code");
@@ -194,6 +227,7 @@ export function QRGenerator() {
           const imgWidth = 80;
           const imgHeight = 80;
           const pageWidth = pdf.internal.pageSize.getWidth();
+          // pageHeight not needed for centering calculation
           const x = (pageWidth - imgWidth) / 2;
           const y = 20;
 
@@ -284,7 +318,8 @@ export function QRGenerator() {
     }
   };
   const handleBulkGeneratorComplete = () => {
-    setActiveTab("history"); // Switch to history tab after bulk generation
+    // Switch to history tab after bulk generation is complete
+    setActiveTab("history");
     // Refresh history after bulk generation
     ApiClient.get(AUTH_API.QR_CODES).then((data) => setHistory(data));
   };

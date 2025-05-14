@@ -30,6 +30,55 @@ qr-code-generator/
 
 ## Features
 
+### Basic Features
+
+- User authentication and registration with JWT
+- QR code generation from text and URLs
+- Saving QR codes to user account
+- Viewing history of generated QR codes
+- Downloading generated QR codes
+- Responsive design for mobile and desktop
+
+### Advanced Features
+
+- **Enhanced QR Customization**
+  - Custom QR code colors
+  - Background color customization
+  - Logo insertion capability
+  - Margin size adjustment
+- **Specialized QR Content Types**
+  - URL QR codes
+  - vCard contact information
+  - WiFi network credentials
+  - Email address and subject
+  - SMS messages
+  - Geographic locations
+  - Calendar events
+  - Phone numbers
+- **Multiple Export Formats**
+  - PNG export
+  - PDF export with content
+  - SVG vector format
+- **Bulk Operations**
+  - Generate multiple QR codes at once
+  - CSV data import (one per line)
+  - Downloadable ZIP with all QR codes
+- **Security Features**
+  - Password-protected QR codes
+  - Expiration dates for temporary QR codes
+  - Maximum scan limits
+- **Analytics and Tracking**
+  - Scan count tracking
+  - Device analytics
+  - Geographic location data visualization
+  - Time-based analytics charts
+
+## Using the Application
+
+For detailed instructions on using the enhanced features, please refer to the [USAGE.md](./USAGE.md) guide.
+
+- Time-based analytics charts
+
 - User authentication (login, signup, logout) with MongoDB and JWT
 - Generate QR codes from text or URLs
 - Download generated QR codes

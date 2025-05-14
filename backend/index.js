@@ -2,15 +2,23 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const path = require("path");
 const QRCode = require("./models/QRCode");
 const authRoutes = require("./routes/auth");
+const qrCodeRoutes = require("./routes/qrcode");
+const analyticsRoutes = require("./routes/analytics");
 const authMiddleware = require("./middleware/auth");
 
 const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Increase payload size limit to 50MB for handling large QR code images and bulk operations
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// Serve static files (logos)
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // MongoDB Connection
 mongoose
@@ -18,11 +26,13 @@ mongoose
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
-// Auth Routes
+// Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/qrcodes", qrCodeRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
-// Protected Routes
-app.post("/api/qrcodes", authMiddleware, async (req, res) => {
+// Legacy route for backwards compatibility
+app.post("/api/qrcodes-legacy", authMiddleware, async (req, res) => {
   try {
     const { text, qrImage } = req.body;
     const userId = req.user.userId; // Get userId from auth middleware

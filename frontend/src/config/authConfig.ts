@@ -9,6 +9,10 @@ export const AUTH_API = {
   LOGIN: "/auth/login",
   USER_INFO: "/auth/me",
   QR_CODES: "/qrcodes",
+  BULK_QR: "/qrcodes/bulk",
+  FORMAT_QR: "/qrcodes/format-content",
+  UPLOAD_LOGO: "/qrcodes/upload-logo",
+  ANALYTICS: "/analytics",
 };
 
 /**
