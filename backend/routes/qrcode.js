@@ -85,8 +85,7 @@ router.post("/", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
     const {
-      text,
-      qrImage: originalQrImage,
+      text, // This is the original destination URL
       qrType = "url",
       customization = {},
       security = {},
@@ -103,32 +102,18 @@ router.post("/", authMiddleware, async (req, res) => {
 
     // Generate tracking URL before creating QR code
     const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const temporaryId = new mongoose.Types.ObjectId(); // Generate a temporary ID
-    const trackingUrl = createTrackingUrl(baseUrl, temporaryId);
+    const temporaryId = new mongoose.Types.ObjectId(); // Generate a temporary ID for the QR code record
+    const trackingUrl = createTrackingUrl(baseUrl, temporaryId.toString()); // Use temporaryId for tracking
 
-    // Generate QR code image with tracking URL
-    const QRCodeLib = require("qrcode");
-    let finalQrImage = originalQrImage;
-
-    if (!finalQrImage) {
-      // Generate new QR code with tracking URL if no pre-generated image exists
-      const qrOptions = {
-        errorCorrectionLevel: "H",
-        margin: customization.margin || 4,
-        color: {
-          dark: customization.color || "#000000",
-          light: customization.backgroundColor || "#ffffff",
-        },
-      };
-      finalQrImage = await QRCodeLib.toDataURL(trackingUrl, qrOptions);
-    }
+    // Generate QR code image with tracking URL and logo/customizations
+    const finalQrImage = await generateQRCodeWithLogo(trackingUrl, customization);
 
     // Create and save the QR code with all required fields
     const qrCode = new QRCodeModel({
-      _id: temporaryId,
+      _id: temporaryId, // Use the same temporaryId for the database record
       userId,
-      text,
-      qrImage: finalQrImage,
+      text, // Store the original URL in the 'text' field for redirection
+      qrImage: finalQrImage, // Store the generated QR code (pointing to trackingUrl)
       qrType,
       security: processedSecurity,
       customization,
@@ -329,58 +314,40 @@ router.post("/bulk", authMiddleware, async (req, res) => {
           const baseUrl = `${req.protocol}://${req.get("host")}`;
           const trackingUrl = createTrackingUrl(baseUrl, temporaryId);
 
-          // Generate QR code using the same function as single QR code generation
-          const qrImage = await generateQRCodeWithLogo(
-            trackingUrl,
-            qr.customization
-          );
+          // Generate QR code using the same logic as single QR code creation
+          const finalQrImage = await generateQRCodeWithLogo(trackingUrl, qr.customization);
 
-          return {
+          const qrCode = new QRCodeModel({
             _id: temporaryId,
-            text: qr.text || "",
             userId,
-            qrImage,
+            text: qr.text,
+            qrImage: finalQrImage,
             qrType: qr.qrType || "url",
-            customization: qr.customization || {},
-            security: {},
-            tags: [],
-          };
+            security: {
+              password: qr.security?.isPasswordProtected ? qr.security.password : "",
+              isPasswordProtected: Boolean(qr.security?.isPasswordProtected),
+              expiresAt: qr.security?.expiresAt || null,
+              maxScans: parseInt(qr.security?.maxScans) || 0,
+            },
+            customization: qr.customization,
+            tags: qr.tags || [],
+          });
+
+          await qrCode.save();
+          return qrCode;
         } catch (error) {
-          console.error("Error generating individual QR code:", error);
-          throw error;
+          console.error("Error processing QR code in bulk:", error);
+          return null;
         }
       })
     );
 
-    const createdQrCodes = await QRCodeModel.insertMany(processedQRCodes);
-    res.status(201).json(createdQrCodes);
+    // Filter out any null results from failed QR code creations
+    const successfulQRCodes = processedQRCodes.filter((qr) => qr !== null);
+
+    res.status(201).json(successfulQRCodes);
   } catch (error) {
-    console.error("Error creating bulk QR codes:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Bulk operations - delete multiple QR codes
-router.delete("/bulk", authMiddleware, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { ids } = req.body;
-
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: "No QR code IDs provided" });
-    }
-
-    const result = await QRCodeModel.deleteMany({
-      _id: { $in: ids },
-      userId,
-    });
-
-    res.json({
-      message: "QR codes deleted successfully",
-      deletedCount: result.deletedCount,
-    });
-  } catch (error) {
-    console.error("Error deleting bulk QR codes:", error);
+    console.error("Error in bulk QR code creation:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
