@@ -21,6 +21,7 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
     margin: 4,
     logo: null as string | null,
   });
+  const [enableTracking, setEnableTracking] = useState(true); // Added state for tracking toggle
 
   const handleCustomizationChange = (
     e: React.ChangeEvent<HTMLInputElement>
@@ -95,6 +96,7 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
       // Call backend API to generate QR codes in bulk
       const response = await ApiClient.post(AUTH_API.BULK_QR, {
         qrCodes: qrCodeData,
+        enableTracking, // Pass tracking preference to backend
       });
 
       // Download as ZIP if successful
@@ -245,6 +247,23 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Tracking Toggle */}
+      <div className={`${styles.inputGroup} ${styles.trackingToggleContainer}`}>
+        <input
+          type="checkbox"
+          id="bulkEnableTrackingToggle"
+          checked={enableTracking}
+          onChange={(e) => setEnableTracking(e.target.checked)}
+          className={styles.checkboxInput}
+        />
+        <label
+          htmlFor="bulkEnableTrackingToggle"
+          className={styles.checkboxLabel}
+        >
+          Enable URL Tracking (recommended)
+        </label>
       </div>
 
       <div className={styles.inputGroup}>

@@ -90,6 +90,7 @@ router.post("/", authMiddleware, async (req, res) => {
       customization = {},
       security = {},
       tags = [],
+      enableTracking = true, // Default to true if not provided
     } = req.body;
 
     // Process security options
@@ -100,30 +101,38 @@ router.post("/", authMiddleware, async (req, res) => {
       maxScans: parseInt(security.maxScans) || 0,
     };
 
-    // Generate tracking URL before creating QR code
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const temporaryId = new mongoose.Types.ObjectId(); // Generate a temporary ID for the QR code record
-    const trackingUrl = createTrackingUrl(baseUrl, temporaryId.toString()); // Use temporaryId for tracking
+    let qrTextForImage = text; // By default, QR image uses the original text
+    let finalTrackingUrl = null; // No tracking URL by default
+    const temporaryId = new mongoose.Types.ObjectId(); // Generate ID for the QR code record
 
-    // Generate QR code image with tracking URL and logo/customizations
+    if (enableTracking) {
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      finalTrackingUrl = createTrackingUrl(baseUrl, temporaryId.toString());
+      qrTextForImage = finalTrackingUrl; // If tracking is on, QR image uses the tracking URL
+    }
+
+    // Generate QR code image with appropriate text (original or tracking) and customizations
     const finalQrImage = await generateQRCodeWithLogo(
-      trackingUrl,
+      qrTextForImage,
       customization
     );
 
     // Create and save the QR code with all required fields
     const qrCode = new QRCodeModel({
-      _id: temporaryId, // Use the same temporaryId for the database record
+      _id: temporaryId, // Use the generated ID
       userId,
-      text, // Store the original URL in the 'text' field for redirection
-      qrImage: finalQrImage, // Store the generated QR code (pointing to trackingUrl)
+      text, // Always store the original URL/text in the 'text' field for redirection or display
+      qrImage: finalQrImage, // Store the generated QR code image
       qrType,
       security: processedSecurity,
       customization,
       tags,
+      trackingEnabled: enableTracking, // Store tracking status
+      trackingUrl: finalTrackingUrl, // Store the tracking URL if enabled
     });
 
     await qrCode.save();
+    // Return the full qrCode object, which now includes qrImage
     res.status(201).json(qrCode);
   } catch (error) {
     console.error("Error creating QR code:", error);
@@ -255,49 +264,87 @@ function calculateOptimalVersion(contentLength, hasLogo) {
 }
 
 // Helper function to generate QR code with logo
-async function generateQRCodeWithLogo(trackingUrl, customization) {
+async function generateQRCodeWithLogo(qrText, customization) {
   try {
-    // Generate QR code as a Buffer
-    const qrCodeBuffer = await QRCode.toBuffer(trackingUrl, {
+    // console.log(`[generateQRCodeWithLogo] Called with qrText: '${qrText}', customization:`, JSON.stringify(customization)); // Optional: Log inputs
+
+    const qrCodeBuffer = await QRCode.toBuffer(qrText, {
       errorCorrectionLevel: "H",
       margin: customization?.margin || 4,
       color: {
         dark: customization?.color || "#000000",
         light: customization?.backgroundColor || "#FFFFFF",
       },
-      width: 1024,
+      width: 1024, // Increased width for better logo clarity
     });
-    // Create Jimp image from QR code buffer
-    const qrImage = await Jimp.read(qrCodeBuffer); // Changed from new Jimp()
 
-    // Add logo if present
-    if (customization?.logo) {
-      const logoPath = path.join(__dirname, "..", customization.logo);
-      const logo = await Jimp.read(logoPath); // Changed from new Jimp()
+    const qrImage = await Jimp.read(qrCodeBuffer);
 
-      // Resize logo to 30% of QR code size
-      const logoSize = qrImage.getWidth() * 0.3;
-      logo.resize(logoSize, logoSize);
+    if (
+      customization?.logo &&
+      typeof customization.logo === "string" &&
+      customization.logo.trim() !== ""
+    ) {
+      let logoImage;
+      if (
+        customization.logo.startsWith("data:image") &&
+        customization.logo.includes(";base64,")
+      ) {
+        // Handle base64 encoded logo
+        // console.log("[generateQRCodeWithLogo] Processing base64 logo.");
+        const base64Data = customization.logo.split(";base64,").pop();
+        const logoBuffer = Buffer.from(base64Data, "base64");
+        logoImage = await Jimp.read(logoBuffer);
+      } else {
+        // Handle logo as a file path (existing logic, as a fallback)
+        // console.log("[generateQRCodeWithLogo] Processing logo as file path.");
+        const logoFilename = path.basename(customization.logo);
+        const logoDir = path.resolve(__dirname, "..", "uploads", "logos");
+        const logoPath = path.join(logoDir, logoFilename);
 
-      // Calculate position to center the logo
-      const xPos = (qrImage.getWidth() - logo.getWidth()) / 2;
-      const yPos = (qrImage.getHeight() - logo.getHeight()) / 2;
+        // console.log(`[generateQRCodeWithLogo] Attempting to read logo from: ${logoPath}`);
 
-      // Composite logo onto QR code
-      qrImage.composite(logo, xPos, yPos, {
+        if (!fs.existsSync(logoPath)) {
+          console.error(
+            `[generateQRCodeWithLogo] Logo file not found at: ${logoPath}. Original logo value: ${customization.logo}`
+          );
+          throw new Error(`Logo file not found. Attempted path: ${logoPath}`);
+        }
+        logoImage = await Jimp.read(logoPath);
+      }
+
+      const logoSize = qrImage.getWidth() * 0.25; // Logo size 25% of QR width
+      logoImage.resize(logoSize, Jimp.AUTO); // Resize maintaining aspect ratio
+
+      const xPos = (qrImage.getWidth() - logoImage.getWidth()) / 2;
+      const yPos = (qrImage.getHeight() - logoImage.getHeight()) / 2;
+
+      qrImage.composite(logoImage, xPos, yPos, {
         mode: Jimp.BLEND_SOURCE_OVER,
         opacitySource: 1,
         opacityDest: 1,
       });
+    } else if (customization?.logo) {
+      // console.log(`[generateQRCodeWithLogo] Invalid or empty logo path/data provided: ${customization.logo}`);
     }
 
-    // Convert to base64
     const mimeType = Jimp.MIME_PNG;
     const base64 = await qrImage.getBase64Async(mimeType);
     return base64;
   } catch (error) {
-    console.error("Error generating QR code with logo:", error);
-    throw error;
+    console.error(
+      "[generateQRCodeWithLogo] Error during processing. QR Text:",
+      qrText,
+      "Customization:",
+      JSON.stringify(customization, null, 2), // Added null, 2 for pretty print
+      "Error Message:",
+      error.message,
+      "Error Stack:",
+      error.stack
+    );
+    throw new Error(
+      `Failed during QR code generation with logo: ${error.message}`
+    );
   }
 }
 
@@ -305,7 +352,8 @@ async function generateQRCodeWithLogo(trackingUrl, customization) {
 router.post("/bulk", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { qrCodes } = req.body;
+    // Destructure enableTracking from req.body, defaulting to true
+    const { qrCodes, enableTracking = true } = req.body;
 
     if (!Array.isArray(qrCodes) || qrCodes.length === 0) {
       return res.status(400).json({ error: "No QR codes provided" });
@@ -314,19 +362,27 @@ router.post("/bulk", authMiddleware, async (req, res) => {
       qrCodes.map(async (qr) => {
         try {
           const temporaryId = new mongoose.Types.ObjectId();
-          const baseUrl = `${req.protocol}://${req.get("host")}`;
-          const trackingUrl = createTrackingUrl(baseUrl, temporaryId);
+          let qrTextForImage = qr.text; // Default to original text for QR image
+          let finalTrackingUrl = null;
 
-          // Generate QR code using the same logic as single QR code creation
+          if (enableTracking) {
+            const baseUrl = `${req.protocol}://${req.get("host")}`;
+            finalTrackingUrl = createTrackingUrl(
+              baseUrl,
+              temporaryId.toString()
+            );
+            qrTextForImage = finalTrackingUrl; // If tracking is on, QR image uses the tracking URL
+          }
+
           const finalQrImage = await generateQRCodeWithLogo(
-            trackingUrl,
+            qrTextForImage,
             qr.customization
           );
 
           const qrCode = new QRCodeModel({
             _id: temporaryId,
             userId,
-            text: qr.text,
+            text: qr.text, // Original text
             qrImage: finalQrImage,
             qrType: qr.qrType || "url",
             security: {
@@ -339,18 +395,19 @@ router.post("/bulk", authMiddleware, async (req, res) => {
             },
             customization: qr.customization,
             tags: qr.tags || [],
+            trackingEnabled: enableTracking, // Store tracking status
+            trackingUrl: finalTrackingUrl, // Store the tracking URL if enabled
           });
 
           await qrCode.save();
           return qrCode;
         } catch (error) {
           console.error("Error processing QR code in bulk:", error);
-          return null;
+          return null; // Return null for failed ones to filter out later
         }
       })
     );
 
-    // Filter out any null results from failed QR code creations
     const successfulQRCodes = processedQRCodes.filter((qr) => qr !== null);
 
     res.status(201).json(successfulQRCodes);

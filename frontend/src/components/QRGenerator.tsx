@@ -12,7 +12,6 @@ import { QRBulkGenerator } from "./QRBulkGenerator";
 import { QRAnalytics } from "./QRAnalytics";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
-import { generateQRWithLogo } from "../utils/qrGenerator";
 // CSS module styles imported via className attributes
 
 interface QRCodeHistory {
@@ -44,7 +43,6 @@ export function QRGenerator() {
   const [activeTab, setActiveTab] = useState("generate");
   const [qrType, setQrType] = useState("url");
   const [qrData, setQrData] = useState<any>({ url: "" });
-  // State for showing/hiding bulk generator - using activeTab now instead
   const qrRef = useRef<HTMLDivElement>(null);
   const [customization, setCustomization] = useState({
     color: "#000000",
@@ -58,6 +56,7 @@ export function QRGenerator() {
     expiresAt: "",
     maxScans: 0,
   });
+  const [enableTracking, setEnableTracking] = useState(true); // Added state for tracking toggle
 
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -112,7 +111,7 @@ export function QRGenerator() {
           }
           break;
         default:
-          qrContent = text;
+          qrContent = text; // Fallback, ensure this aligns with your qrData structure
       }
 
       if (!qrContent) {
@@ -122,30 +121,24 @@ export function QRGenerator() {
       setIsLoading(true);
 
       try {
-        // Generate QR code with customization and logo
-        const url = await generateQRWithLogo(qrContent, {
-          color: customization.color,
-          backgroundColor: customization.backgroundColor,
-          margin: customization.margin,
-          logo: customization.logo,
-        });
-
-        setQrImage(url);
-        setText(qrContent); // Set text for backward compatibility
+        // The backend will handle whether to use trackingUrl or qrContent directly for the image
+        // based on enableTracking. The qrImage state here will receive the final image data URL.
 
         // Save to backend
         if (user?.userId) {
-          await ApiClient.post(AUTH_API.QR_CODES, {
-            text: qrContent,
-            qrImage: url,
+          const response = await ApiClient.post(AUTH_API.QR_CODES, {
+            text: qrContent, // Always send the original content as 'text'
             qrType,
             customization,
             security,
+            enableTracking, // Send tracking preference
           });
+          setQrImage(response.qrImage); // Assuming backend returns the generated QR image URL
+          setText(qrContent); // Update text state for display purposes if needed
 
           // Refresh history
-          const data = await ApiClient.get(AUTH_API.QR_CODES);
-          setHistory(data);
+          const historyData = await ApiClient.get(AUTH_API.QR_CODES);
+          setHistory(historyData);
         }
 
         toast.success("QR Code generated successfully!");
@@ -272,6 +265,7 @@ export function QRGenerator() {
       expiresAt: "",
       maxScans: 0,
     });
+    setEnableTracking(true); // Reset tracking to default ON
   };
 
   const handleLogout = async () => {
@@ -373,6 +367,23 @@ export function QRGenerator() {
                 security={security}
                 onSecurityChange={handleSecurityChange}
               />
+
+              {/* Tracking Toggle */}
+              <div className="mb-3 form-check">
+                <input
+                  type="checkbox"
+                  className="form-check-input"
+                  id="enableTrackingToggle"
+                  checked={enableTracking}
+                  onChange={(e) => setEnableTracking(e.target.checked)}
+                />
+                <label
+                  className="form-check-label"
+                  htmlFor="enableTrackingToggle"
+                >
+                  Enable URL Tracking (recommended)
+                </label>
+              </div>
 
               {/* Generate Button */}
               <div className="d-grid gap-2 d-md-flex justify-content-md-end mb-4">
