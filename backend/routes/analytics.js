@@ -132,7 +132,7 @@ router.post("/verify-password/:qrCodeId", async (req, res) => {
 });
 
 // Get analytics for all user's QR codes (requires auth)
-router.get("/analytics", authMiddleware, async (req, res) => {
+router.get("/", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
     const analytics = await getAnalytics(null, userId);
@@ -149,7 +149,7 @@ router.get("/analytics", authMiddleware, async (req, res) => {
 });
 
 // Get analytics for a specific QR code (requires auth)
-router.get("/analytics/:qrCodeId", authMiddleware, async (req, res) => {
+router.get("/:qrCodeId", authMiddleware, async (req, res) => {
   try {
     const { qrCodeId } = req.params;
     const userId = req.user.userId;
