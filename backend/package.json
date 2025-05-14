@@ -17,6 +17,7 @@
     "express": "^5.1.0",
     "express-validator": "^7.2.1",
     "fs-extra": "^11.3.0",
+    "geoip-lite": "^1.4.10",
     "jimp": "^0.22.10",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.14.3",

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const path = require("path");
 const QRCode = require("../models/QRCode");
+const geoip = require("geoip-lite");
 const { recordScan, isQrCodeExpired } = require("../utils/analytics");
 
 // Handle QR code scans
@@ -101,15 +102,35 @@ router.get("/:qrCodeId/:trackingId", async (req, res) => {
       `);
     }
 
+    // Get IP and location info
+    let ip = req.ip || req.connection.remoteAddress;
+    // Remove IPv6 prefix if present
+    ip = ip.replace(/^::ffff:/, "");
+
+    console.log("Client IP:", ip);
+
+    // Get location data from IP
+    const geo = geoip.lookup(ip);
+    console.log("Geolocation data:", geo);
+
+    const locationData = {
+      country: geo ? geo.country : "Unknown",
+      city: geo ? geo.city : "Unknown",
+    };
+
+    console.log("Location data:", locationData);
+
     // If not password protected, record scan and redirect
     console.log("Recording scan for non-password protected QR code");
 
     try {
       const scanData = {
         userAgent: req.headers["user-agent"],
-        ip: req.ip,
+        ip: ip,
         referer: req.headers.referer,
         trackingId,
+        country: locationData.country,
+        city: locationData.city,
       };
 
       console.log("Scan data:", scanData);

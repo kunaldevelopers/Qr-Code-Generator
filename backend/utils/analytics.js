@@ -47,29 +47,48 @@ const recordScan = async (qrCodeId, scanData = {}) => {
       city = "Unknown",
     } = scanData;
 
-    // Detect device type
+    // Enhanced device detection
     let deviceType = "unknown";
-    if (
-      userAgent.includes("Mobile") ||
-      userAgent.includes("Android") ||
-      userAgent.includes("iPhone")
-    ) {
-      deviceType = "mobile";
-    } else if (userAgent.includes("Tablet") || userAgent.includes("iPad")) {
-      deviceType = "tablet";
-    } else if (
-      userAgent.includes("Windows") ||
-      userAgent.includes("Macintosh") ||
-      userAgent.includes("Linux")
-    ) {
-      deviceType = "desktop";
+    const ua = userAgent.toLowerCase();
+
+    if (ua.includes("iphone") || ua.includes("ipad")) {
+      deviceType = "ios";
+    } else if (ua.includes("android")) {
+      deviceType = "android";
+    } else if (ua.includes("windows phone")) {
+      deviceType = "windows phone";
+    } else if (ua.includes("macintosh") || ua.includes("mac os")) {
+      deviceType = "mac";
+    } else if (ua.includes("windows")) {
+      deviceType = "windows";
+    } else if (ua.includes("linux")) {
+      deviceType = "linux";
     }
+
+    // Format for mobile/tablet detection
+    if (deviceType === "unknown") {
+      if (ua.includes("mobile") || ua.includes("tablet")) {
+        deviceType = "mobile";
+      } else if (
+        ua.includes("windows") ||
+        ua.includes("macintosh") ||
+        ua.includes("linux")
+      ) {
+        deviceType = "desktop";
+      }
+    }
+
+    // Get location data
+    let locationInfo = {
+      country: country || "Unknown",
+      city: city || "Unknown",
+    };
 
     // Use atomic update to increment scan count and update other fields
     const updatedQrCode = await QRCode.findByIdAndUpdate(
       qrCodeId,
       {
-        $inc: { "analytics.scanCount": 1 }, // Atomic increment
+        $inc: { "analytics.scanCount": 1 },
         $set: {
           "analytics.lastScanned": new Date(),
           isExpired:
@@ -78,8 +97,8 @@ const recordScan = async (qrCodeId, scanData = {}) => {
         },
         $push: {
           "analytics.scanLocations": {
-            country,
-            city,
+            country: locationInfo.country,
+            city: locationInfo.city,
             timestamp: new Date(),
           },
         },
@@ -90,7 +109,7 @@ const recordScan = async (qrCodeId, scanData = {}) => {
       }
     );
 
-    // Handle device analytics separately to avoid race conditions
+    // Handle device analytics
     const deviceExists = await QRCode.findOne({
       _id: qrCodeId,
       "analytics.devices.type": deviceType,
@@ -126,6 +145,7 @@ const recordScan = async (qrCodeId, scanData = {}) => {
       scanCount: finalQrCode.analytics.scanCount,
       isExpired: finalQrCode.isExpired,
       devices: finalQrCode.analytics.devices,
+      location: locationInfo,
     });
 
     return finalQrCode;
