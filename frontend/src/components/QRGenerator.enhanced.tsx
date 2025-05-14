@@ -142,13 +142,12 @@ export function QRGenerator() {
           });
         }
       } else {
-        // Use standard QR code library (no logo)
-        url = await QRCode.toDataURL(qrContent, {
+        // Use our custom utility for QR code without logo for consistent handling
+        url = await generateQRWithLogo(qrContent, {
+          color: customization.color,
+          backgroundColor: customization.backgroundColor,
           margin: customization.margin,
-          color: {
-            dark: customization.color,
-            light: customization.backgroundColor,
-          },
+          logo: null,
         });
       }
 
