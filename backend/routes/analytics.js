@@ -17,33 +17,14 @@ router.get("/track/:qrCodeId/:trackingId", async (req, res) => {
   try {
     const { qrCodeId, trackingId } = req.params;
 
-    // Record scan with available data
-    const scanData = {
-      userAgent: req.headers["user-agent"],
-      ip: req.ip,
-      referer: req.headers.referer,
-      // In a real implementation, you would use a geolocation service
-      // to determine country and city from the IP address
-      country: "Unknown",
-      city: "Unknown",
-    };
-
-    const qrCode = await recordScan(qrCodeId, scanData);
+    // First check if QR code exists
+    const qrCode = await QRCode.findById(qrCodeId);
 
     if (!qrCode) {
       return res.status(404).json({ error: "QR code not found" });
     }
 
-    // Check if QR code is password protected
-    if (qrCode.security.isPasswordProtected) {
-      return res.json({
-        requiresPassword: true,
-        qrCodeId,
-        trackingId,
-      });
-    }
-
-    // Check if QR code is expired
+    // Check security before recording scan
     if (isQrCodeExpired(qrCode)) {
       return res.json({
         expired: true,
@@ -51,14 +32,41 @@ router.get("/track/:qrCodeId/:trackingId", async (req, res) => {
       });
     }
 
-    // Redirect to the QR code's destination
-    // In a real implementation, you would redirect to the original URL
-    // For now, just return the data
+    // Record scan with available data
+    const scanData = {
+      userAgent: req.headers["user-agent"],
+      ip: req.ip,
+      referer: req.headers.referer,
+      country: "Unknown",
+      city: "Unknown",
+    };
+
+    const updatedQrCode = await recordScan(qrCodeId, scanData);
+
+    if (!updatedQrCode) {
+      return res.json({
+        expired: true,
+        message: "This QR code has expired or reached maximum scans",
+      });
+    }
+
+    if (updatedQrCode.security.isPasswordProtected) {
+      return res.json({
+        requiresPassword: true,
+        qrCodeId,
+        trackingId,
+      });
+    }
+
     res.json({
       success: true,
       qrCode: {
-        text: qrCode.text,
-        type: qrCode.qrType,
+        text: updatedQrCode.text,
+        type: updatedQrCode.qrType,
+        analytics: {
+          scanCount: updatedQrCode.analytics.scanCount,
+          maxScans: updatedQrCode.security.maxScans || 0,
+        },
       },
     });
   } catch (error) {
@@ -79,30 +87,42 @@ router.post("/verify-password/:qrCodeId", async (req, res) => {
       return res.status(404).json({ error: "QR code not found" });
     }
 
-    // Check if QR code is password protected
-    if (!qrCode.security.isPasswordProtected) {
-      return res.json({ success: true, qrCode: { text: qrCode.text } });
-    }
-
-    // Check password
-    if (qrCode.security.password !== password) {
-      return res.status(401).json({ error: "Invalid password" });
-    }
-
-    // Check if QR code is expired
+    // First check expiration
     if (isQrCodeExpired(qrCode)) {
       return res.json({
         expired: true,
-        message: "This QR code has expired",
+        message: "This QR code has expired or reached maximum scans",
       });
     }
 
-    // Return QR code data
+    // Handle password check
+    if (qrCode.security.isPasswordProtected) {
+      if (!password) {
+        return res.status(401).json({ error: "Password is required" });
+      }
+      if (qrCode.security.password !== password) {
+        return res.status(401).json({ error: "Invalid password" });
+      }
+
+      // Record scan after successful password verification
+      await recordScan(qrCodeId, {
+        userAgent: req.headers["user-agent"],
+        ip: req.ip,
+        referer: req.headers.referer,
+      });
+    }
+
+    // Return success and the original destination URL
     res.json({
       success: true,
+      redirectUrl: qrCode.text, // Return the original destination URL
       qrCode: {
         text: qrCode.text,
         type: qrCode.qrType,
+        analytics: {
+          scanCount: qrCode.analytics.scanCount,
+          maxScans: qrCode.security.maxScans || 0,
+        },
       },
     });
   } catch (error) {

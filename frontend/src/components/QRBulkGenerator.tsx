@@ -19,6 +19,7 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
     color: "#000000",
     backgroundColor: "#ffffff",
     margin: 4,
+    logo: null as string | null,
   });
 
   const handleCustomizationChange = (
@@ -39,6 +40,8 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
       }
 
       setGenerating(true);
+
+      // Split and filter empty lines upfront
       const lines = inputText.split("\n").filter((line) => line.trim());
 
       if (lines.length === 0) {
@@ -48,14 +51,46 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
       }
 
       // Prepare data for bulk generation
-      const qrCodeData = lines.map((line) => {
-        const text = `${prefix}${line.trim()}${suffix}`;
-        return {
-          text,
-          qrType,
-          customization,
-        };
-      });
+      const qrCodeData = await Promise.all(
+        lines.map(async (line) => {
+          const trimmedLine = line.trim();
+          // Create the full text with prefix and suffix
+          const text = `${prefix}${trimmedLine}${suffix}`;
+
+          let qrContent = text;
+
+          // Format content based on QR type if needed
+          if (qrType !== "text") {
+            try {
+              const response = await ApiClient.post(AUTH_API.FORMAT_QR, {
+                qrType,
+                data: { [qrType]: text },
+              });
+              // Only use formatted content if it exists, otherwise keep original text
+              if (response.formattedContent) {
+                qrContent = response.formattedContent;
+              }
+            } catch (error) {
+              console.error("Error formatting QR content:", error);
+              // Keep using the original text as fallback
+            }
+          }
+
+          // Return the QR code data with required fields
+          return {
+            text: qrContent || text, // Ensure text is never empty by falling back to original text
+            qrType,
+            customization,
+          };
+        })
+      ).then((codes) => codes.filter((code) => code !== null)); // Filter out any null entries
+
+      // Validate we have QR codes to generate
+      if (qrCodeData.length === 0) {
+        toast.error("No valid QR codes to generate");
+        setGenerating(false);
+        return;
+      }
 
       // Call backend API to generate QR codes in bulk
       const response = await ApiClient.post(AUTH_API.BULK_QR, {
@@ -148,7 +183,6 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
             className={styles.colorInput}
           />
         </div>
-
         <div className={styles.inputGroup}>
           <label>Background Color:</label>
           <input
@@ -158,8 +192,7 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
             onChange={handleCustomizationChange}
             className={styles.colorInput}
           />
-        </div>
-
+        </div>{" "}
         <div className={styles.inputGroup}>
           <label>Margin:</label>
           <input
@@ -171,6 +204,46 @@ export function QRBulkGenerator({ onComplete }: QRBulkGeneratorProps) {
             onChange={handleCustomizationChange}
             className={styles.numberInput}
           />
+        </div>
+        <div className={styles.inputGroup}>
+          <label>Logo:</label>
+          <input
+            type="file"
+            name="logo"
+            accept="image/png,image/jpeg,image/svg+xml"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                const formData = new FormData();
+                formData.append("logo", file);
+                try {
+                  const response = await ApiClient.postFormData(
+                    AUTH_API.UPLOAD_LOGO,
+                    formData
+                  );
+                  setCustomization((prev) => ({
+                    ...prev,
+                    logo: response.logoPath,
+                  }));
+                  toast.success("Logo uploaded successfully");
+                } catch (error) {
+                  console.error("Error uploading logo:", error);
+                  toast.error("Failed to upload logo");
+                }
+              }
+            }}
+            className={styles.fileInput}
+          />
+          {customization.logo && (
+            <button
+              onClick={() =>
+                setCustomization((prev) => ({ ...prev, logo: null }))
+              }
+              className={styles.removeLogoButton}
+            >
+              Remove Logo
+            </button>
+          )}
         </div>
       </div>
 

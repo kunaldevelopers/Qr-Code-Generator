@@ -123,6 +123,25 @@ export const ApiClient = {
   },
 
   /**
+   * Make authenticated POST request with FormData (for file uploads)
+   */
+  postFormData: async (endpoint: string, formData: FormData) => {
+    const response = await fetch(`${AUTH_API.BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers: {
+        ...TokenService.getAuthHeader(),
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`API request failed: ${response.status}`);
+    }
+
+    return response.json();
+  },
+
+  /**
    * Make authenticated DELETE request
    */
   delete: async (endpoint: string) => {

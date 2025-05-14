@@ -4,11 +4,14 @@
 
 const express = require("express");
 const router = express.Router();
-const QRCode = require("../models/QRCode");
+const QRCodeModel = require("../models/QRCode");
+const QRCode = require("qrcode");
 const authMiddleware = require("../middleware/auth");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs-extra");
+const Jimp = require("jimp"); // Changed from require("jimp").default
+const mongoose = require("mongoose");
 const qrTypeFormatter = require("../utils/qrTypeFormatter");
 const { createTrackingUrl } = require("../utils/analytics");
 
@@ -48,7 +51,7 @@ const upload = multer({
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const qrCodes = await QRCode.find({ userId }).sort({ createdAt: -1 });
+    const qrCodes = await QRCodeModel.find({ userId }).sort({ createdAt: -1 });
     res.json(qrCodes);
   } catch (error) {
     console.error("Error getting QR codes:", error);
@@ -62,7 +65,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.userId;
 
-    const qrCode = await QRCode.findOne({ _id: id, userId });
+    const qrCode = await QRCodeModel.findOne({ _id: id, userId });
 
     if (!qrCode) {
       return res
@@ -83,21 +86,52 @@ router.post("/", authMiddleware, async (req, res) => {
     const userId = req.user.userId;
     const {
       text,
-      qrImage,
+      qrImage: originalQrImage,
       qrType = "url",
       customization = {},
       security = {},
       tags = [],
     } = req.body;
 
-    // Create the QR code
-    const qrCode = new QRCode({
+    // Process security options
+    const processedSecurity = {
+      password: security.isPasswordProtected ? security.password : "",
+      isPasswordProtected: Boolean(security.isPasswordProtected),
+      expiresAt: security.expiresAt || null,
+      maxScans: parseInt(security.maxScans) || 0,
+    };
+
+    // Generate tracking URL before creating QR code
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const temporaryId = new mongoose.Types.ObjectId(); // Generate a temporary ID
+    const trackingUrl = createTrackingUrl(baseUrl, temporaryId);
+
+    // Generate QR code image with tracking URL
+    const QRCodeLib = require("qrcode");
+    let finalQrImage = originalQrImage;
+
+    if (!finalQrImage) {
+      // Generate new QR code with tracking URL if no pre-generated image exists
+      const qrOptions = {
+        errorCorrectionLevel: "H",
+        margin: customization.margin || 4,
+        color: {
+          dark: customization.color || "#000000",
+          light: customization.backgroundColor || "#ffffff",
+        },
+      };
+      finalQrImage = await QRCodeLib.toDataURL(trackingUrl, qrOptions);
+    }
+
+    // Create and save the QR code with all required fields
+    const qrCode = new QRCodeModel({
+      _id: temporaryId,
       userId,
       text,
-      qrImage,
+      qrImage: finalQrImage,
       qrType,
+      security: processedSecurity,
       customization,
-      security,
       tags,
     });
 
@@ -177,7 +211,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     // Prevent updating userId
     delete updateData.userId;
 
-    const qrCode = await QRCode.findOneAndUpdate(
+    const qrCode = await QRCodeModel.findOneAndUpdate(
       { _id: id, userId },
       updateData,
       { new: true }
@@ -202,7 +236,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.userId;
 
-    const qrCode = await QRCode.findOneAndDelete({ _id: id, userId });
+    const qrCode = await QRCodeModel.findOneAndDelete({ _id: id, userId });
 
     if (!qrCode) {
       return res
@@ -217,6 +251,68 @@ router.delete("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// Helper function to calculate optimal QR version
+function calculateOptimalVersion(contentLength, hasLogo) {
+  let version = 2;
+  while (version <= 40) {
+    const effectiveLength = hasLogo
+      ? Math.ceil(contentLength * 1.3)
+      : contentLength;
+    if (version * version * 4 >= effectiveLength) {
+      return version;
+    }
+    version++;
+  }
+  return 40;
+}
+
+// Helper function to generate QR code with logo
+async function generateQRCodeWithLogo(trackingUrl, customization) {
+  try {
+    // Generate QR code as a Buffer
+    const qrCodeBuffer = await QRCode.toBuffer(trackingUrl, {
+      errorCorrectionLevel: "H",
+      margin: customization?.margin || 4,
+      color: {
+        dark: customization?.color || "#000000",
+        light: customization?.backgroundColor || "#FFFFFF",
+      },
+      width: 1024,
+    });
+    // Create Jimp image from QR code buffer
+    const qrImage = await Jimp.read(qrCodeBuffer); // Changed from new Jimp()
+
+    // Add logo if present
+    if (customization?.logo) {
+      const logoPath = path.join(__dirname, "..", customization.logo);
+      const logo = await Jimp.read(logoPath); // Changed from new Jimp()
+
+      // Resize logo to 30% of QR code size
+      const logoSize = qrImage.getWidth() * 0.3;
+      logo.resize(logoSize, logoSize);
+
+      // Calculate position to center the logo
+      const xPos = (qrImage.getWidth() - logo.getWidth()) / 2;
+      const yPos = (qrImage.getHeight() - logo.getHeight()) / 2;
+
+      // Composite logo onto QR code
+      qrImage.composite(logo, xPos, yPos, {
+        mode: Jimp.BLEND_SOURCE_OVER,
+        opacitySource: 1,
+        opacityDest: 1,
+      });
+    }
+
+    // Convert to base64
+    const mimeType = Jimp.MIME_PNG;
+    const base64 = await qrImage.getBase64Async(mimeType);
+    return base64;
+  } catch (error) {
+    console.error("Error generating QR code with logo:", error);
+    throw error;
+  }
+}
+
 // Bulk operations - create multiple QR codes
 router.post("/bulk", authMiddleware, async (req, res) => {
   try {
@@ -226,15 +322,37 @@ router.post("/bulk", authMiddleware, async (req, res) => {
     if (!Array.isArray(qrCodes) || qrCodes.length === 0) {
       return res.status(400).json({ error: "No QR codes provided" });
     }
+    const processedQRCodes = await Promise.all(
+      qrCodes.map(async (qr) => {
+        try {
+          const temporaryId = new mongoose.Types.ObjectId();
+          const baseUrl = `${req.protocol}://${req.get("host")}`;
+          const trackingUrl = createTrackingUrl(baseUrl, temporaryId);
 
-    // Add userId to each QR code
-    const qrCodesWithUserId = qrCodes.map((qr) => ({
-      ...qr,
-      userId,
-    }));
+          // Generate QR code using the same function as single QR code generation
+          const qrImage = await generateQRCodeWithLogo(
+            trackingUrl,
+            qr.customization
+          );
 
-    // Create all QR codes
-    const createdQrCodes = await QRCode.insertMany(qrCodesWithUserId);
+          return {
+            _id: temporaryId,
+            text: qr.text || "",
+            userId,
+            qrImage,
+            qrType: qr.qrType || "url",
+            customization: qr.customization || {},
+            security: {},
+            tags: [],
+          };
+        } catch (error) {
+          console.error("Error generating individual QR code:", error);
+          throw error;
+        }
+      })
+    );
+
+    const createdQrCodes = await QRCodeModel.insertMany(processedQRCodes);
     res.status(201).json(createdQrCodes);
   } catch (error) {
     console.error("Error creating bulk QR codes:", error);
@@ -252,7 +370,7 @@ router.delete("/bulk", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "No QR code IDs provided" });
     }
 
-    const result = await QRCode.deleteMany({
+    const result = await QRCodeModel.deleteMany({
       _id: { $in: ids },
       userId,
     });

@@ -17,7 +17,6 @@ const qrCodeSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-  // New fields for enhanced features
   qrType: {
     type: String,
     enum: [
@@ -57,13 +56,66 @@ const qrCodeSchema = new mongoose.Schema({
     ],
   },
   security: {
-    password: { type: String },
+    password: {
+      type: String,
+      set: function (val) {
+        // Only set password if isPasswordProtected is true
+        if (this.security && this.security.isPasswordProtected) {
+          return val;
+        }
+        return "";
+      },
+    },
     isPasswordProtected: { type: Boolean, default: false },
-    expiresAt: { type: Date },
-    maxScans: { type: Number },
+    expiresAt: {
+      type: Date,
+      set: function (val) {
+        // Convert string date to Date object and validate
+        if (val) {
+          const date = new Date(val);
+          return isNaN(date.getTime()) ? null : date;
+        }
+        return null;
+      },
+    },
+    maxScans: {
+      type: Number,
+      min: 0,
+      set: function (val) {
+        // Convert to integer and validate
+        const num = parseInt(val);
+        return isNaN(num) ? 0 : Math.max(0, num);
+      },
+    },
   },
   tags: [String],
   isExpired: { type: Boolean, default: false },
+});
+
+// Pre-save middleware to ensure consistent security state
+qrCodeSchema.pre("save", function (next) {
+  // Clear password if not password protected
+  if (!this.security.isPasswordProtected) {
+    this.security.password = "";
+  }
+
+  // Ensure maxScans is a positive number or 0
+  if (
+    typeof this.security.maxScans !== "number" ||
+    this.security.maxScans < 0
+  ) {
+    this.security.maxScans = 0;
+  }
+
+  // Validate expiration date
+  if (this.security.expiresAt) {
+    const expiry = new Date(this.security.expiresAt);
+    if (isNaN(expiry.getTime())) {
+      this.security.expiresAt = null;
+    }
+  }
+
+  next();
 });
 
 module.exports = mongoose.model("QRCode", qrCodeSchema);

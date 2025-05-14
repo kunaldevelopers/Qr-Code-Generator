@@ -14,15 +14,26 @@ const createTrackingUrl = (baseUrl, qrCodeId) => {
 // Record a scan of a QR code
 const recordScan = async (qrCodeId, scanData = {}) => {
   try {
+    const qrCode = await QRCode.findById(qrCodeId);
+    if (!qrCode) return null;
+
+    // Check expiration before recording scan
+    if (isQrCodeExpired(qrCode)) {
+      qrCode.isExpired = true;
+      await qrCode.save();
+      return null;
+    }
+
+    // Process scan data
     const {
       userAgent = "",
       ip = "",
       referer = "",
-      country = "",
-      city = "",
+      country = "Unknown",
+      city = "Unknown",
     } = scanData;
 
-    // Detect device type from user agent
+    // Detect device type
     let deviceType = "unknown";
     if (
       userAgent.includes("Mobile") ||
@@ -41,15 +52,11 @@ const recordScan = async (qrCodeId, scanData = {}) => {
     }
 
     // Update QR code analytics
-    const qrCode = await QRCode.findById(qrCodeId);
-    if (!qrCode) return null;
-
-    // Increment scan count
-    qrCode.analytics.scanCount += 1;
+    qrCode.analytics.scanCount = (qrCode.analytics.scanCount || 0) + 1;
     qrCode.analytics.lastScanned = new Date();
 
-    // Add scan location
-    if (country || city) {
+    // Add scan location if provided
+    if (country !== "Unknown" || city !== "Unknown") {
       qrCode.analytics.scanLocations.push({
         country,
         city,
@@ -57,27 +64,25 @@ const recordScan = async (qrCodeId, scanData = {}) => {
       });
     }
 
-    // Update device type counts
-    const deviceIndex = qrCode.analytics.devices.findIndex(
+    // Update device analytics
+    let deviceIndex = qrCode.analytics.devices.findIndex(
       (d) => d.type === deviceType
     );
     if (deviceIndex >= 0) {
       qrCode.analytics.devices[deviceIndex].count += 1;
     } else {
-      qrCode.analytics.devices.push({
-        type: deviceType,
-        count: 1,
-      });
+      qrCode.analytics.devices.push({ type: deviceType, count: 1 });
     }
 
-    // Check if QR code has reached max scans
+    // Check max scans limit
     if (
-      qrCode.security.maxScans &&
+      qrCode.security.maxScans > 0 &&
       qrCode.analytics.scanCount >= qrCode.security.maxScans
     ) {
       qrCode.isExpired = true;
     }
 
+    // Save updates
     await qrCode.save();
     return qrCode;
   } catch (error) {
@@ -90,20 +95,21 @@ const recordScan = async (qrCodeId, scanData = {}) => {
 const isQrCodeExpired = (qrCode) => {
   if (!qrCode) return true;
 
-  // Check if explicitly marked as expired
+  // Check if already marked as expired
   if (qrCode.isExpired) return true;
 
   // Check expiration date
-  if (
-    qrCode.security.expiresAt &&
-    new Date() > new Date(qrCode.security.expiresAt)
-  ) {
-    return true;
+  if (qrCode.security.expiresAt) {
+    const now = new Date();
+    const expiry = new Date(qrCode.security.expiresAt);
+    if (!isNaN(expiry.getTime()) && now > expiry) {
+      return true;
+    }
   }
 
   // Check max scans
   if (
-    qrCode.security.maxScans &&
+    qrCode.security.maxScans > 0 &&
     qrCode.analytics.scanCount >= qrCode.security.maxScans
   ) {
     return true;

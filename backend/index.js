@@ -3,10 +3,13 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
+
+// Import routes
+const trackRoutes = require("./routes/track");
+const analyticsRoutes = require("./routes/analytics");
 const QRCode = require("./models/QRCode");
 const authRoutes = require("./routes/auth");
 const qrCodeRoutes = require("./routes/qrcode");
-const analyticsRoutes = require("./routes/analytics");
 const authMiddleware = require("./middleware/auth");
 
 const app = express();
@@ -30,6 +33,7 @@ mongoose
 app.use("/api/auth", authRoutes);
 app.use("/api/qrcodes", qrCodeRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/track", trackRoutes);
 
 // Legacy route for backwards compatibility
 app.post("/api/qrcodes-legacy", authMiddleware, async (req, res) => {
