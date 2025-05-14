@@ -248,6 +248,36 @@ router.delete("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// Bulk delete QR codes
+router.post("/delete-bulk", authMiddleware, async (req, res) => {
+  try {
+    const { qrCodeIds } = req.body;
+    const userId = req.user.userId;
+
+    if (!Array.isArray(qrCodeIds) || qrCodeIds.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "No QR codes specified for deletion" });
+    }
+
+    // Find and delete QR codes that belong to the user
+    const result = await QRCodeModel.deleteMany({
+      _id: { $in: qrCodeIds },
+      userId: userId,
+    });
+
+    console.log("Bulk delete result:", result);
+
+    res.json({
+      message: `Successfully deleted ${result.deletedCount} QR codes`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Error bulk deleting QR codes:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Helper function to calculate optimal QR version
 function calculateOptimalVersion(contentLength, hasLogo) {
   let version = 2;
