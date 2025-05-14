@@ -121,6 +121,7 @@ export function QRGenerator() {
 
       // Generate QR code with customization
       let url = "";
+
       if (customization.logo) {
         try {
           // Use our custom utility for QR code with logo
